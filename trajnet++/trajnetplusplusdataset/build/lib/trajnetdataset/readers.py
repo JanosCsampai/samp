@@ -287,6 +287,17 @@ def standard(line):
                     float(line[2]),
                     float(line[3]))
 
+def highd_track_row(line):
+    if (line[0] == "frame"):
+        return TrackRow(0, 0, 0, 0)
+    return TrackRow(int(float(line[0])),
+                    int(float(line[1])),
+                    float(line[2]),
+                    float(line[3])
+    )
+
+
+
 def car_data(filename_content):
     frame_id = int(filename_content[0].split('.')[0].split('/')[-1])
     ratio = 5.0 / 162 ## 162 pix = 5 m

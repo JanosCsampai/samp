@@ -6,6 +6,8 @@ import random
 
 import pysparkling
 import scipy.io
+import io
+import csv
 
 from . import readers
 from .scene import Scenes
@@ -117,10 +119,19 @@ def car_data(sc, input_file):
             .flatMap(readers.car_data)
             .cache())
 
+def highd_track_data(sc, input_file):
+    print('processing ' + input_file)
+    return (sc
+            .textFile(input_file)
+            .mapPartitions(csv.reader)
+            .map(readers.highd_track_row)
+            .cache())
+
 def write(input_rows, output_file, args):
     """ Write Valid Scenes without categorization """
 
     print(" Entering Writing ")
+    print(input_rows.filter(True))
     ## To handle two different time stamps 7:00 and 17:00 of cff
     if args.order_frames:
         frames = sorted(set(input_rows.map(lambda r: r.frame).toLocalIterator()),
@@ -241,7 +252,6 @@ def main():
                               help='Type IIIc std deviation for group')
     categorizers.add_argument('--acceptance', nargs='+', type=float, default=[0.1, 1, 1, 1],
                               help='acceptance ratio of different trajectory (I, II, III, IV) types')
-
     args = parser.parse_args()
     # Set Seed
     random.seed(42)
@@ -251,21 +261,24 @@ def main():
 
     # Real datasets conversion
     if not args.synthetic:
-        write(biwi(sc, 'data/raw/biwi/seq_hotel/obsmat.txt'),
-              'output_pre/{split}/biwi_hotel.ndjson', args)
-        categorize(sc, 'output_pre/{split}/biwi_hotel.ndjson', args)
-        write(crowds(sc, 'data/raw/crowds/crowds_zara01.vsp'),
-              'output_pre/{split}/crowds_zara01.ndjson', args)
-        categorize(sc, 'output_pre/{split}/crowds_zara01.ndjson', args)
-        write(crowds(sc, 'data/raw/crowds/crowds_zara03.vsp'),
-              'output_pre/{split}/crowds_zara03.ndjson', args)
-        categorize(sc, 'output_pre/{split}/crowds_zara03.ndjson', args)
-        write(crowds(sc, 'data/raw/crowds/students001.vsp'),
-              'output_pre/{split}/crowds_students001.ndjson', args)
-        categorize(sc, 'output_pre/{split}/crowds_students001.ndjson', args)
-        write(crowds(sc, 'data/raw/crowds/students003.vsp'),
-              'output_pre/{split}/crowds_students003.ndjson', args)
-        categorize(sc, 'output_pre/{split}/crowds_students003.ndjson', args)
+        write(highd_track_data(sc, 'data/01_tracks.csv'),
+              'output_pre/{split}/01_tracks.ndjson', args)
+        categorize(sc, 'output_pre/{split}/01_tracks.ndjson', args)
+        # write(biwi(sc, 'data/raw/biwi/seq_hotel/obsmat.txt'),
+        #       'output_pre/{split}/biwi_hotel.ndjson', args)
+        # categorize(sc, 'output_pre/{split}/biwi_hotel.ndjson', args)
+        # write(crowds(sc, 'data/raw/crowds/crowds_zara01.vsp'),
+        #       'output_pre/{split}/crowds_zara01.ndjson', args)
+        # categorize(sc, 'output_pre/{split}/crowds_zara01.ndjson', args)
+        # write(crowds(sc, 'data/raw/crowds/crowds_zara03.vsp'),
+        #       'output_pre/{split}/crowds_zara03.ndjson', args)
+        # categorize(sc, 'output_pre/{split}/crowds_zara03.ndjson', args)
+        # write(crowds(sc, 'data/raw/crowds/students001.vsp'),
+        #       'output_pre/{split}/crowds_students001.ndjson', args)
+        # categorize(sc, 'output_pre/{split}/crowds_students001.ndjson', args)
+        # write(crowds(sc, 'data/raw/crowds/students003.vsp'),
+        #       'output_pre/{split}/crowds_students003.ndjson', args)
+        # categorize(sc, 'output_pre/{split}/crowds_students003.ndjson', args)
 
         # # # new datasets
         # write(lcas(sc, 'data/raw/lcas/test/data.csv'),
@@ -309,6 +322,7 @@ def main():
               'output_pre/{split}/orca_five_synth.ndjson', args)
         categorize(sc, 'output_pre/{split}/orca_five_synth.ndjson', args)
         edit_goal_file('orca_circle_crossing_5ped_1000scenes_.pkl', 'orca_five_synth.pkl')
+        
 
 if __name__ == '__main__':
     main()

@@ -1,12 +1,23 @@
 from pathlib import Path
 import argparse
+import numpy as np
 from trajnetplusplustools.reader import Reader
 from trajnetplusplustools import show
 
 
 def add_gt_observation_to_prediction(gt_observation, model_prediction):
     obs_length = len(gt_observation[0]) - len(model_prediction[0])
-    full_predicted_paths = [gt_observation[ped_id][:obs_length] + pred for ped_id, pred in enumerate(model_prediction)]
+    #print(len(gt_observation), len(model_prediction))
+    #print([len(gt_observation[ped_id]) for ped_id, pred in enumerate(model_prediction)])
+    full_predicted_paths = []
+    for pred in model_prediction:
+        for gt_ped in gt_observation:
+            if len(gt_ped)>0 and len(pred)>0 and gt_ped[0].pedestrian == pred[0].pedestrian:
+                full_predicted_paths.append(gt_ped[:obs_length] + pred)
+                break
+            #full_predicted_paths.append(pred)
+    
+    #full_predicted_paths = [gt_observation[ped_id][:obs_length] + pred for ped_id, pred in enumerate(model_prediction)]
     return full_predicted_paths
 
 def main():
@@ -65,21 +76,27 @@ def main():
             pred_neigh_paths[label_dict[name]] = predicted_paths[1:]
 
         # Visualize prediction(s) overlayed on GT scene
-        output_filename = f"{folder_name}/single_scene{scene_id}.png" if single_model else \
-                            f"{folder_name}/multiple_scene{scene_id}.png"
-        with show.predicted_paths(paths, pred_paths, output_file=output_filename):
-            pass
+        # output_filename = f"{folder_name}/single_scene{scene_id}.png" if single_model else \
+        #                     f"{folder_name}/multiple_scene{scene_id}.png"
+        # with show.predicted_paths(paths, pred_paths, output_file=output_filename):
+        #     pass
 
         # Used when visualizing only a single model
         if single_model:
             # Visualize GT scene
+            # Create array of colors for each pedestrian
+            colors = [np.random.rand(3,) for ped_rows in paths[1:]]
+
             gt_filename = f"{folder_name}/gt_scene{scene_id}.png"
-            with show.paths(paths, output_file=gt_filename):
+            with show.paths(paths, output_file=gt_filename, colors=colors):
                 pass
             # Visualize Model Prediction scene
             pred_filename = f"{folder_name}/pred_scene{scene_id}.png"
             full_predicted_paths = add_gt_observation_to_prediction(paths, predicted_paths)
-            with show.paths(full_predicted_paths, output_file=pred_filename):
+            with show.paths(full_predicted_paths, output_file=pred_filename, colors=colors):
+                pass
+            pred_only_filename = f"{folder_name}/pred_only_scene{scene_id}.png"
+            with show.paths(predicted_paths, output_file=pred_only_filename, colors=colors):
                 pass
 
 if __name__ == '__main__':

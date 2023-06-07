@@ -61,6 +61,7 @@ def get_predictions(args):
             pred_list = Parallel(n_jobs=12)(delayed(predict_scene)(predictor, model_name, paths, scene_goal, args)
                                             for (_, _, paths), scene_goal in zip(scenes, scene_goals))
             
+            print(zip(pred_list, scenes))
             # Write all predictions
             write_predictions(pred_list, scenes, model_name, dataset_name, args)
 

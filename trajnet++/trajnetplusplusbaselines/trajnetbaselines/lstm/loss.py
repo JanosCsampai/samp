@@ -68,7 +68,7 @@ class PredictionLoss(torch.nn.Module):
         inputs = inputs.transpose(0, 1)
 
         ## Loss calculation
-        inputs = inputs.reshape(-1, 5)
+        inputs = inputs.reshape(-1, 20)
         targets = targets.reshape(-1, 2)
         inputs_bg = inputs.clone()
         inputs_bg[:, 2] = 3.0  # sigma_x
