@@ -29,13 +29,14 @@ class PredictionLoss(torch.nn.Module):
         """
 
         x1, x2 = x1x2[:, 0], x1x2[:, 1]
-        mu1, mu2, s1, s2, rho = (
+        mu1, mu2, s1, s2 = (
             mu1mu2s1s2rho[:, 0],
             mu1mu2s1s2rho[:, 1],
             mu1mu2s1s2rho[:, 2],
             mu1mu2s1s2rho[:, 3],
-            mu1mu2s1s2rho[:, 4],
+            # mu1mu2s1s2rho[:, 4],
         )
+        rho = 1.0
 
         norm1 = x1 - mu1
         norm2 = x2 - mu2
@@ -68,12 +69,12 @@ class PredictionLoss(torch.nn.Module):
         inputs = inputs.transpose(0, 1)
 
         ## Loss calculation
-        inputs = inputs.reshape(-1, 20)
+        inputs = inputs.reshape(-1, 4)
         targets = targets.reshape(-1, 2)
         inputs_bg = inputs.clone()
         inputs_bg[:, 2] = 3.0  # sigma_x
         inputs_bg[:, 3] = 3.0  # sigma_y
-        inputs_bg[:, 4] = 0.0  # rho
+        # inputs_bg[:, 4] = 0.0  # rho
 
         values = -torch.log(
             0.01 +
@@ -122,9 +123,8 @@ class L2Loss(torch.nn.Module):
         # [pred_length, num_tracks, 5] --> [pred_length, batch_size, 5]
         inputs = inputs.transpose(0, 1)
         inputs = inputs[batch_split[:-1]]
-        inputs = inputs.transpose(0, 1)
-
-        loss = self.loss(inputs[:, :, :2], targets)
+        inputs = inputs.transpose(0, 1).to(torch.float)
+        loss = self.loss(inputs[:, :, :2].to(targets.device), targets)
 
         ## Used in variety loss (SGAN)
         if self.keep_batch_dim:
@@ -132,7 +132,8 @@ class L2Loss(torch.nn.Module):
         
         if self.col_wt:
             return torch.mean(loss) * self.loss_multiplier + col_loss * self.loss_multiplier
-        return (torch.mean(loss) * self.loss_multiplier)
+        print("Loss: ", torch.nanmean(loss) * self.loss_multiplier)
+        return (torch.nanmean(loss) * self.loss_multiplier)
 
 
 def CollisionLoss(predictions, batch_split, col_wt=10.0, col_distance=0.2):

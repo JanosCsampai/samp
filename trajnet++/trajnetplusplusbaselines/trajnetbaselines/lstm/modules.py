@@ -70,6 +70,7 @@ class Hidden2ForceField(torch.nn.Module):
         self.linear = torch.nn.Linear(hidden_dim, resolution)
 
     def forward(self, hidden_state):
+
         force_field = self.linear(hidden_state)
 
         # numerically stable output ranges

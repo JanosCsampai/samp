@@ -292,8 +292,8 @@ def highd_track_row(line):
         return TrackRow(0, 0, 0, 0)
     return TrackRow(int(float(line[0])),
                     int(float(line[1])),
-                    float(line[2]),
-                    float(line[3])
+                    float(line[2]) / 100,
+                    float(line[3]) / 100
     )
 
 

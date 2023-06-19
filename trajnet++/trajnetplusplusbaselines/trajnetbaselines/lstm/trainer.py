@@ -83,6 +83,7 @@ class Trainer(object):
         start_time = time.time()
 
         print('epoch', epoch)
+        print("---------")
         random.shuffle(scenes)
         epoch_loss = 0.0
         self.model.train()
@@ -107,6 +108,8 @@ class Trainer(object):
 
             ## Drop Distant
             scene, mask = drop_distant(scene)
+            #print(scene.shape)
+
             scene_goal = scene_goal[mask]
 
             ##process scene
@@ -251,15 +254,14 @@ class Trainer(object):
 
         observed = batch_scene[self.start_length:self.obs_length].clone()
         prediction_truth = batch_scene[self.obs_length:self.seq_length].clone()
-        print(observed.shape, prediction_truth.shape, batch_scene.size())
         
         targets = batch_scene[self.obs_length:self.seq_length] - batch_scene[self.obs_length-1:self.seq_length-1]
 
         rel_outputs, outputs = self.model(observed, batch_scene_goal, batch_split, prediction_truth)
-        print(outputs.shape, rel_outputs.shape)
+ 
         # For collision loss calculation
         primary_prediction = batch_scene[-self.pred_length:].clone()
-        primary_prediction[:, batch_split[:-1]] = outputs[-self.pred_length:, batch_split[:-1]]
+        primary_prediction[:, batch_split[:-1]] = outputs[-self.pred_length:, batch_split[:-1]].float().to(primary_prediction.device)
 
         ## Loss wrt primary tracks of each scene only
         loss = self.criterion(rel_outputs[-self.pred_length:], targets, batch_split, primary_prediction) * self.batch_size
@@ -457,7 +459,7 @@ def main(epochs=25):
     # add args.device
     # args.device = torch.device('cpu')
     if not args.disable_cuda and torch.cuda.is_available():
-        args.device = torch.device('cuda')
+        args.device = torch.device('cuda:1')
 
     args.path = 'DATA_BLOCK/' + args.path
     ## Prepare data

@@ -18,7 +18,7 @@ from .utils import center_scene
 
 NAN = float('nan')
 
-def drop_distant(xy, r=6.0):
+def drop_distant(xy, r=20.0):
     """
     Drops pedestrians more than r meters away from primary ped
     """
@@ -48,7 +48,7 @@ def generate_pooling_inputs(obs2, obs1, hidden_cell_state, track_mask, batch_spl
 
 
 class LSTM(torch.nn.Module):
-    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=4):
+    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=8):
         """ Initialize the LSTM forecasting model
 
         Attributes
@@ -111,7 +111,6 @@ class LSTM(torch.nn.Module):
         obs1 = obs1[0]
         obs2 = obs2[0]
         plt.plot(obs1[:, 0], obs1[:, 1], 'bo', markersize=1, color="black")
-        print(obs2[:, 0] - obs1[:, 0])
 
         # Plot arrows from previous to current positions
         plt.quiver(obs1[:, 0], obs1[:, 1], obs2[:, 0] - obs1[:, 0], 
@@ -242,8 +241,11 @@ class LSTM(torch.nn.Module):
             self.pool.reset(batch_size * (max_num_neighbor+1), max_num_neighbor, device=observed.device)
 
         # list of predictions
-        positions = []  # true (during obs phase) and predicted positions
-        force_fields = []
+        force_fields = [] # encoder output
+        positions = []
+        # positions = copy.deepcopy(list(itertools.chain.from_iterable(
+        #     (observed)
+        # ))) # true (during obs phase) and predicted positions
 
         if len(observed) == 2:
             positions = [observed[-1]]
@@ -253,116 +255,121 @@ class LSTM(torch.nn.Module):
             ##LSTM Step
             hidden_cell_state, force_field = self.step(self.encoder, hidden_cell_state, obs1, obs2, goals, batch_split)
             force_fields.append(force_field)
+            positions.append(obs2)
 
         # initialize predictions with last position to form velocity. DEEP COPY !!!
         prediction_truth = copy.deepcopy(list(itertools.chain.from_iterable(
-            (observed[-2:], prediction_truth)
+            (observed[-1:], prediction_truth)
         )))
         # decoder, predictions
         for obs1, obs2 in zip(prediction_truth[:-1], prediction_truth[1:]):
             if obs1 is None:
                 obs1 = positions[-2].detach()  # DETACH!!!
+            # else:
+                # for primary_id in batch_split[:-1]:
+                    #obs1[primary_id] = positions[-2][primary_id].detach()  # DETACH!!!
             if obs2 is None:
                 obs2 = positions[-1].detach()
-
+            # else:
+            #     for primary_id in batch_split[:-1]:
+            #         print(obs2[primary_id])
+                    # obs2[primary_id] = positions[-1][primary_id].detach()  # DETACH!!!
             velocity = self.encoder_to_force_field(force_field, obs1, obs2, batch_split, observed=observed)
             # concat predictions
             # normals.append(normal)
-            velocity = torch.stack(velocity, dim=0)
-            positions.append(obs2.cpu() + velocity)
+            # if (len(velocity) == 0): continue 
+            # velocity = torch.stack(velocity, dim=0)
+            positions.append(obs2 + velocity)
 
         # Pred_scene: Tensor [seq_length, num_tracks, 2]
         #    Absolute positions of all pedestrians
         # Rel_pred_scene: Tensor [seq_length, num_tracks, 5]
         #    Velocities of all pedestrians
-        print(positions)
         pred_scene = torch.stack(positions, dim=0)
         rel_pred_scene = torch.stack(positions, dim=0)
+        pred_scene.requires_grad = True
+        rel_pred_scene.requires_grad = True
 
         return rel_pred_scene, pred_scene
     
     def encoder_to_force_field(self, force_field, obs1, obs2, batch_split, observed):
-        print("decoder")
+        velocities = obs2 - obs1
+        device = torch.device("cuda:1")
+        # Preallocate memory for forces
+        forces = torch.zeros((len(obs1), 2), device=device)
+        
+        encoder_output_reshaped = force_field.view(len(velocities), self.force_field_resolution, self.force_field_resolution, 2)
+        # For each scene
+        for scene_idx, (start, end) in enumerate(zip(batch_split[:-1], batch_split[1:])):
+            # Extract Scene out of Encoder output
+            obs1m_scene = obs1[start:end]
+            obs2m_scene = obs2[start:end]
+            velocities_scene = velocities[start:end]
 
-        # Extract Force Field out of Encoder output
-        obs1m = obs1.detach().cpu().numpy()
-        obs2m = obs2.detach().cpu().numpy()
-        velocities = obs2m - obs1m
+            # Create a grid of points for each scene
+            x_min_scene = torch.min(obs1m_scene[:, 0])
+            x_max_scene = torch.max(obs1m_scene[:, 0])
+            y_min_scene = torch.min(obs1m_scene[:, 1])
+            y_max_scene = torch.max(obs1m_scene[:, 1])
 
-        # Create a grid of points
-        x_min = min(np.min(obs1m[:, 0]), np.min(obs2m[:, 0]))
-        x_max = max(np.max(obs1m[:, 0]), np.max(obs2m[:, 0]))
-        y_min = min(np.min(obs1m[:, 1]), np.min(obs2m[:, 1]))
-        y_max = max(np.max(obs1m[:, 1]), np.max(obs2m[:, 1]))
-
-        # Create a grid of points
-        x = np.linspace(x_min, x_max, self.force_field_resolution)
-        y = np.linspace(y_min, y_max, self.force_field_resolution)
-        X, Y = np.meshgrid(x, y)
-
-        forces = []
-
-        # For each pedestrian
-        for i in range(len(velocities)):
-            # Get the velocity of the pedestrian
-            vx, vy = velocities[i]
-
+            # Create a grid of points
+            x_scene = torch.linspace(x_min_scene, x_max_scene, self.force_field_resolution, device=device)
+            y_scene = torch.linspace(y_min_scene, y_max_scene, self.force_field_resolution, device=device)
+            X_scene, Y_scene = torch.meshgrid(x_scene, y_scene)
+            
+            
             # Scale the velocities to make them larger
             scale = 10
-            vx *= scale
-            vy *= scale
-
+            velocities_scene.mul_(scale)
+           
             # Create a vector field where each vector has the same direction as the pedestrian's velocity
-            U = vx * np.ones_like(X)
-            V = vy * np.ones_like(Y)
+            U_scene = velocities_scene[:, 0].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(X_scene)
+            V_scene = velocities_scene[:, 1].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(Y_scene)
+            U_scene += encoder_output_reshaped[end-start, : , : , 0]
+            V_scene += encoder_output_reshaped[end-start, : , : , 1]
 
-            # Manipulate the vector field based on the output of the encoder
-            # print(len(force_field))
-            encoder_output_reshaped = force_field[i].view(self.force_field_resolution, self.force_field_resolution, 2)
-            # print(encoder_output_reshaped.shape)
-            # print(encoder_output_reshaped)
-            encoder_output = encoder_output_reshaped.detach().cpu().numpy()
+            # Create an array of vectors for interpolation 
+            vectors = torch.stack([U_scene.flatten(), V_scene.flatten()], dim=-1).view(end-start, self.force_field_resolution*self.force_field_resolution, 2)
             
-            U += encoder_output[ : , : , 0]
-            V += encoder_output[ : , : , 1]
-            
-
-            # Plot the vector field
-            plt.figure()
-            plt.quiver(X, Y, U, V)
-            scale = 1
-            # Plot the position of the pedestrian
-            # plt.plot(obs2m[i, 0] / scale, obs2m[i, 1] / scale, 'ro')
-
-            # Plot the trajectory of the pedestrian
-            plt.plot([obs1m[i, 0] / scale, obs2m[i, 0] / scale], [obs1m[i, 1] / scale, obs2m[i, 1] / scale], 'r-', linewidth=2, color="red")
-            if observed is not None:
-                for j in range(len(velocities)):
-                    past_positions = observed[:, j, :].detach().cpu().numpy()
-                    color = "blue"
-                    if j == i: color = "red"
-                    for k in range(len(past_positions) - 1):
-                        plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
-                                [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
-
-
-            plt.title(f'Vector field for pedestrian {i}')
-            # Save the plot as an image file
-            plt.savefig(f'vector_field_pedestrian_{i}.png')
-
             # Create a grid of points for interpolation
-            points = np.column_stack([X.flatten(), Y.flatten()])
-
-            # Create an array of vectors for interpolation
-            vectors = np.column_stack([U.flatten(), V.flatten()])
+            points = torch.stack([X_scene.flatten(), Y_scene.flatten()], dim=-1)
 
             # Interpolate the force field to find the force at the pedestrian's current position
-            current_position = obs2m[i]
-            current_force = griddata(points, vectors, current_position, method='cubic')
+            current_positions = obs2m_scene
+            
+            # Check if there are any NaN values in points
+            if torch.isnan(points).any():
+                forces[start:end] = torch.zeros((end - start, 2), device=device)
+            else:
+                for i in range(start, end):
+                    current_force = griddata(points.detach().cpu().numpy(), vectors[i-start].detach().cpu().numpy(), current_positions[i-start].cpu().numpy(), method='cubic')[0]
+                #     # Add the current force to the list of forces
+                    forces[i] = torch.from_numpy(current_force).to(device)
 
-            # Add the current force to the list of forces
-            forces.append(torch.from_numpy(current_force))
-        print(forces)
+                if False:
+                    # Plot the vector field
+                    plt.figure()
+                    plt.quiver(X_scene, Y_scene, U, V)
+                    scale = 1
+
+                    # Plot the trajectory of the pedestrian
+                    plt.plot([obs1m_scene[i-start, 0] / scale, obs2m_scene[i-start, 0] / scale], 
+                            [obs1m_scene[i-start, 1] / scale, obs2m_scene[i-start, 1] / scale], 'r-', linewidth=2, color="red")
+                    observed = observed
+                    if observed is not None:
+                        for j in range(start, end):
+                            past_positions = observed[:, j, :]
+                            color = "blue"
+                            if j == i: color = "red"
+                            for k in range(len(past_positions) - 1):
+                                plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
+                                        [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
+
+                    plt.title(f'Vector field for pedestrian {i}')
+                    # Save the plot as an image file
+                    plt.savefig(f'vector_field_scene{scene_idx}_pedestrian_{i}.png')
+
+
         return forces
 
 
@@ -386,7 +393,6 @@ class LSTMPredictor(object):
 
 
     def __call__(self, paths, scene_goal, n_predict=12, modes=1, predict_all=True, obs_length=9, start_length=0, args=None):
-        print("here")
         self.model.eval()
         # self.model.train()
         with torch.no_grad():
