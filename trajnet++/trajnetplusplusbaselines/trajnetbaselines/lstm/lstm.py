@@ -147,7 +147,6 @@ class LSTM(torch.nn.Module):
             with respect to the current position
         """
         if lstm == self.encoder:
-            #full_force = torch.mul(hidden_cell_state[0][1], hidden_cell_state[1][1])
             num_tracks = len(obs2)
             # mask for pedestrians absent from scene (partial trajectories)
             # consider only the hidden states of pedestrains present in scene
@@ -219,7 +218,6 @@ class LSTM(torch.nn.Module):
         pred_scene : Tensor [pred_length, num_tracks, 2]
             Predicted positions of pedestrians i.e. absolute positions
         """
-        print("lstm.forward")
         assert ((prediction_truth is None) + (n_predict is None)) == 1
         if n_predict is not None:
             prediction_truth = [None for _ in range(n_predict)]
@@ -243,9 +241,6 @@ class LSTM(torch.nn.Module):
         # list of predictions
         force_fields = [] # encoder output
         positions = []
-        # positions = copy.deepcopy(list(itertools.chain.from_iterable(
-        #     (observed)
-        # ))) # true (during obs phase) and predicted positions
 
         if len(observed) == 2:
             positions = [observed[-1]]
@@ -276,9 +271,7 @@ class LSTM(torch.nn.Module):
                     # obs2[primary_id] = positions[-1][primary_id].detach()  # DETACH!!!
             velocity = self.encoder_to_force_field(force_field, obs1, obs2, batch_split, observed=observed)
             # concat predictions
-            # normals.append(normal)
-            # if (len(velocity) == 0): continue 
-            # velocity = torch.stack(velocity, dim=0)
+
             positions.append(obs2 + velocity)
 
         # Pred_scene: Tensor [seq_length, num_tracks, 2]
@@ -305,7 +298,6 @@ class LSTM(torch.nn.Module):
         mean_velocity = observed[-1] - observed[0]
         # velocities = observed[1:] - observed[:-1]  # Calculate velocities
         # mean_velocity = torch.mean(velocities, dim=0)  # Calculate mean velocity
-        # else: print("NOT NAN")
         return mean_velocity
 
 
@@ -315,25 +307,19 @@ class LSTM(torch.nn.Module):
         device = torch.device("cuda:1")
         # Preallocate memory for forces
         forces = torch.zeros((len(obs1), 2), device=device)
+
+        # Fixed boundaries for the scene
+        x_min_scene = -1
+        x_max_scene = 4
+        y_min_scene = -4
+        y_max_scene = 4
         
         encoder_output_reshaped = force_field.view(len(velocities), self.force_field_resolution, self.force_field_resolution, 2)
         # For each scene
         for scene_idx, (start, end) in enumerate(zip(batch_split[:-1], batch_split[1:])):
             # Extract Scene out of Encoder output
-            # print("OBS: ", observed[ : , start:end, : ].shape, observed.shape, " | VEL: ", velocities[start:end].shape, velocities.shape)
             obs1m_scene = obs1[start:end]
             obs2m_scene = obs2[start:end]
-            velocities_scene = velocities[start:end]
-
-            # Create a grid of points for each scene
-            # x_min_scene = torch.min(obs1m_scene[:, 0])
-            # x_max_scene = torch.max(obs1m_scene[:, 0])
-            # y_min_scene = torch.min(obs1m_scene[:, 1])
-            # y_max_scene = torch.max(obs1m_scene[:, 1])
-            x_min_scene = -4
-            x_max_scene = 4
-            y_min_scene = -4
-            y_max_scene = 4
 
             # Create a grid of points
             x_scene = torch.linspace(x_min_scene, x_max_scene, self.force_field_resolution, device=device)
@@ -343,7 +329,6 @@ class LSTM(torch.nn.Module):
 
             # Calculate mean velocity over the observed sequence
             mean_velocity = self.calculate_mean_velocity(observed[ : , start:end, : ])
-            # print(mean_velocity.shape, velocities_scene.shape)
             
             # Scale the velocities to make them larger
             scale = 10
@@ -353,8 +338,9 @@ class LSTM(torch.nn.Module):
             # print("MEAN VEL: ", mean_velocity.shape)
             U_scene = mean_velocity[:, 0].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(X_scene)
             V_scene = mean_velocity[:, 1].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(Y_scene)
-            # U_scene += encoder_output_reshaped[end-start, : , : , 0]
-            # V_scene += encoder_output_reshaped[end-start, : , : , 1]
+            if (U_scene.shape[0] < end-start): print(U_scene.shape, end, start)
+            U_scene += encoder_output_reshaped[end-start, : , : , 0]
+            V_scene += encoder_output_reshaped[end-start, : , : , 1]
 
             # Create an array of vectors for interpolation 
             vectors = torch.stack([U_scene.flatten(), V_scene.flatten()], dim=-1).view(end-start, self.force_field_resolution*self.force_field_resolution, 2)
@@ -367,30 +353,19 @@ class LSTM(torch.nn.Module):
             
             # Check if there are any NaN values in points
             if torch.isnan(points).any():
-                print("WHAAAAAAAT")
                 forces[start:end] = torch.zeros((end - start, 2), device=device)
             else:
                 for i in range(start, end):
                     current_force = griddata(points.detach().cpu().numpy(), vectors[i-start].detach().cpu().numpy(), current_positions[i-start].cpu().numpy(), method='cubic')[0]
                 #     # Add the current force to the list of forces
                     forces[i] = torch.from_numpy(current_force).to(device)
-
+                i = start
                 if save_plots:
                     if (torch.isnan(obs1m_scene[i-start, 0])): continue
                     # Plot the vector field
                     plt.figure()
-                    # # Calculate the magnitude of each vector
-                    # magnitude = torch.sqrt(U_scene**2 + V_scene**2)
 
-                    # # Avoid division by zero
-                    # magnitude[magnitude == 0] = 1
-
-                    # # Normalize each vector
-                    # U_scene_norm = U_scene / magnitude
-                    # V_scene_norm = V_scene / magnitude
-
-                    plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_scene[0].detach().cpu(), V_scene[0].detach().cpu(), scale_units='xy', scale=2)
-                    # print(f'vector_field_scene_mean_velocity_{scene_idx}_pedestrian_{i}', torch.any(torch.isnan(Y_scene)), torch.any(torch.isnan(X_scene)), torch.any(torch.isnan(torch.nan_to_num(U_scene, 0))), torch.any(torch.isnan(torch.nan_to_num(V_scene, 0))))
+                    plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_scene[i-start].detach().cpu(), V_scene[i-start].detach().cpu(), scale_units='xy', scale=2)
                     scale = 1
 
                     # Plot the trajectory of the pedestrian
@@ -404,19 +379,19 @@ class LSTM(torch.nn.Module):
                             if j == i: color = "red"
                             
                             for k in range(len(past_positions) - 1):
+                                if (k == len(past_positions) - 2): color = "green"
                                 plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
                                         [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
                                 
                             # If this is the main pedestrian, draw a large arrow representing the direction of the whole past positions
                             if j == i:
                                 direction_vector = (past_positions[-1] - past_positions[0]).cpu()
-                                # print("PAST: ", direction_vector.shape)
                                 mean_velocity_vector = mean_velocity[i-start].cpu()
                                 plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, direction_vector[0], direction_vector[1], color='green', width=0.05)
                                 plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, mean_velocity_vector[0], mean_velocity_vector[1], color='orange', width=0.05)
                     plt.title(f'Vector field for pedestrian {i}')
                     # Save the plot as an image file
-                    plt.savefig(f'vector_field_scene_mean_velocity_{scene_idx}_pedestrian_{i}.png')
+                    plt.savefig(f'vector_field_scene_{scene_idx}_pedestrian_{i}.png')
                     plt.close()
 
 
