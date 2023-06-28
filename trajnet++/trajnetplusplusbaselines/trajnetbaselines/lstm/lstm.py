@@ -287,8 +287,6 @@ class LSTM(torch.nn.Module):
         #    Velocities of all pedestrians
         pred_scene = torch.stack(positions, dim=0)
         rel_pred_scene = torch.stack(positions, dim=0)
-        pred_scene.requires_grad = True
-        rel_pred_scene.requires_grad = True
         pr.disable()
         pr.dump_stats('profiling_results.prof')
         return rel_pred_scene, pred_scene
@@ -310,7 +308,7 @@ class LSTM(torch.nn.Module):
 
 
 
-    def encoder_to_force_field(self, force_field, obs1, obs2, batch_split, observed, save_plots=False):
+    def encoder_to_force_field(self, force_field, obs1, obs2, batch_split, observed, save_plots=True):
     
         velocities = obs2 - obs1
         device = torch.device("cuda:1")
@@ -364,16 +362,6 @@ class LSTM(torch.nn.Module):
             # Reshape the points to [height, width, 2]
             points = points.view(self.force_field_resolution, self.force_field_resolution, 2).repeat(end-start, 1, 1, 1)
 
-            # Add batch and channel dimensions to the points
-            # points = points.unsqueeze(0)
-            # print(points.shape)
-
-            # Reshape the vectors to [batch_size, height, width, 2]
-            # vectors = vectors.view(-1, self.force_field_resolution, self.force_field_resolution, 2)
-
-            # Add a channel dimension to the vectors
-            # vectors = vectors.unsqueeze(1)
-
             # Interpolate the force field to find the force at the pedestrian's current position
             current_positions = obs2m_scene
 
@@ -381,64 +369,55 @@ class LSTM(torch.nn.Module):
             current_positions = (current_positions - current_positions.min()) / (current_positions.max() - current_positions.min()) * 2 - 1
 
             # Reshape the current positions to [batch_size, height, width, 2]
-            # print("Current1: ", current_positions.shape)
             current_positions = current_positions.view(end-start, 1, 1, 2)
-            # print("Current2: ", current_positions.shape)
 
-            # Add batch and channel dimensions to the current positions
-            # current_positions = current_positions.unsqueeze(0).unsqueeze(0)
+            interpolated = torch.nn.functional.grid_sample(vectors.nan_to_num(0), current_positions.nan_to_num(0), padding_mode="zeros", align_corners=True)
+            print(interpolated.shape, end-start)
+            if torch.isnan(points).any():
+                forces[start:end] = torch.zeros((end - start, 2), device=device)
+            else:
+                forces[start:end] = interpolated.view(end-start, 2)
 
-            # Interpolate the force field to find the force at the pedestrian's current position
-            # current_positions = obs2m_scene
+                i = start
+                if save_plots:
+                    if (torch.isnan(obs1m_scene[i-start, 0])): continue
+                    # Plot the vector field
+                    plt.figure()
 
-            interpolated = torch.nn.functional.grid_sample(vectors, current_positions, padding_mode="zeros", align_corners=True)
-            # print(vectors.shape, current_positions.shape, interpolated.shape)
-            # interpolated = interpolated.view(end-start, 2)
-            # print("AHA: ", interpolated.shape)
-            forces[start:end] = interpolated.view(end-start, 2)
+                    plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_scene[i-start].detach().cpu(), V_scene[i-start].detach().cpu(), scale_units='xy', scale=2)
+                    scale = 1
 
-            # # Check if there are any NaN values in points
-            # if torch.isnan(points).any():
-            #     forces[start:end] = torch.zeros((end - start, 2), device=device)
-            # else:
-            #     for i in range(start, end):
-            #         current_force = griddata(points.detach().cpu().numpy(), vectors[i-start].detach().cpu().numpy(), current_positions[i-start].cpu().numpy(), method='cubic')[0]
-            #         # Add the current force to the list of forces
-            #         forces[i] = torch.from_numpy(current_force).to(device)
-            #     i = start
-            #     if save_plots:
-            #         if (torch.isnan(obs1m_scene[i-start, 0])): continue
-            #         # Plot the vector field
-            #         plt.figure()
-
-            #         plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_scene[i-start].detach().cpu(), V_scene[i-start].detach().cpu(), scale_units='xy', scale=2)
-            #         scale = 1
-
-            #         # Plot the trajectory of the pedestrian
-            #         plt.plot([obs1m_scene[i-start, 0] / scale, obs2m_scene[i-start, 0] / scale], 
-            #                 [obs1m_scene[i-start, 1] / scale, obs2m_scene[i-start, 1] / scale], 'r-', linewidth=2, color="red")
-            #         observed = observed
-            #         if observed is not None:
-            #             for j in range(start, end):
-            #                 past_positions = observed[:, j, :]
-            #                 color = "blue"
-            #                 if j == i: color = "red"
+                    # Plot the trajectory of the pedestrian
+                    plt.plot([obs1m_scene[i-start, 0] / scale, obs2m_scene[i-start, 0] / scale], 
+                            [obs1m_scene[i-start, 1] / scale, obs2m_scene[i-start, 1] / scale], 'r-', linewidth=2, color="red")
+                    observed = observed
+                    if observed is not None:
+                        for j in range(start, end):
+                            past_positions = observed[:, j, :]
+                            color = "blue"
+                            if j == i: color = "red"
                             
-            #                 for k in range(len(past_positions) - 1):
-            #                     if (k == len(past_positions) - 2): color = "green"
-            #                     plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
-            #                             [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
+                            for k in range(len(past_positions) - 1):
+                                if (k == len(past_positions) - 2): color = "green"
+                                plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
+                                        [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
                                 
-            #                 # If this is the main pedestrian, draw a large arrow representing the direction of the whole past positions
-            #                 if j == i:
-            #                     direction_vector = (past_positions[-1] - past_positions[0]).cpu()
-            #                     mean_velocity_vector = mean_velocity[i-start].cpu()
-            #                     plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, direction_vector[0], direction_vector[1], color='green', width=0.05)
-            #                     plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, mean_velocity_vector[0], mean_velocity_vector[1], color='orange', width=0.05)
-            #         plt.title(f'Vector field for pedestrian {i}')
-            #         # Save the plot as an image file
-            #         plt.savefig(f'vector_field_scene_{scene_idx}_pedestrian_{i}.png')
-            #         plt.close()
+                            # If this is the main pedestrian, draw a large arrow representing the direction of the whole past positions
+
+                            force = interpolated[j-start]
+                            plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, force[0].cpu().detach() / scale, force[1].cpu().detach() / scale, color='green', width=0.05)
+                            # print(force.shape)
+                            if j == i:
+                                direction_vector = (past_positions[-1] - past_positions[0]).cpu()
+
+                                mean_velocity_vector = mean_velocity[i-start].cpu()
+
+                                # plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, direction_vector[0], direction_vector[1], color='green', width=0.05)
+                                plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, mean_velocity_vector[0], mean_velocity_vector[1], color='orange', width=0.05)
+                    plt.title(f'Vector field for pedestrian {i}')
+                    # Save the plot as an image file
+                    plt.savefig(f'vector_field_scene_{scene_idx}_pedestrian_{i}.png')
+                    plt.close()
 
 
         return forces
