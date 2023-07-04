@@ -53,7 +53,7 @@ def generate_pooling_inputs(obs2, obs1, hidden_cell_state, track_mask, batch_spl
 
 
 class LSTM(torch.nn.Module):
-    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=24):
+    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=12):
         """ Initialize the LSTM forecasting model
 
         Attributes
@@ -348,13 +348,18 @@ class LSTM(torch.nn.Module):
             U_scene = mean_velocity[:, 0].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(X_scene)
             V_scene = mean_velocity[:, 1].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(Y_scene)
             if (U_scene.shape[0] < end-start): print(U_scene.shape, end, start)
-            # U_scene += encoder_output_reshaped[end-start, : , : , 0]
-            # V_scene += encoder_output_reshaped[end-start, : , : , 1]
+            U_scene += encoder_output_reshaped[end-start, : , : , 0]
+            V_scene += encoder_output_reshaped[end-start, : , : , 1]
             
             # Create an array of vectors for interpolation 
             # print(torch.stack([U_scene.flatten(), V_scene.flatten()]).shape)
-            vectors = torch.stack([U_scene.flatten(), V_scene.flatten()]).view(2, self.force_field_resolution, self.force_field_resolution, -1).permute(3, 0, 1, 2)
+            # vectors = torch.stack([U_scene.flatten(), V_scene.flatten()]).view(2, self.force_field_resolution, self.force_field_resolution, -1).permute(3, 0, 1, 2)
             
+            vectors = torch.zeros((end-start, 2, self.force_field_resolution, self.force_field_resolution), device=device)
+            vectors[:, 0, :, :] = U_scene
+            vectors[:, 1, :, :] = V_scene
+
+
             # Create a grid of points for interpolation
             points = torch.stack([X_scene.flatten(), Y_scene.flatten()], dim=-1)
 
@@ -377,8 +382,6 @@ class LSTM(torch.nn.Module):
             # Reshape the current positions to [batch_size, height, width, 2]
             current_positions = current_positions.view(end-start, 1, 1, 2)
             # print(current_positions.shape, current_positions[0])
-            # print(vectors)
-            # vectors = torch.ones(vectors.shape, device=device) * 2
             interpolated = torch.nn.functional.grid_sample(vectors.nan_to_num(0), current_positions, padding_mode="zeros", align_corners=False, mode="bilinear")
             # print(interpolated)
             if torch.isnan(points).any():
@@ -414,15 +417,15 @@ class LSTM(torch.nn.Module):
 
 
                             if j == i:
-                                force = interpolated[j - start]
-                                print("Force:", force)
-                                print("Interpolated shape:", interpolated.shape)
+                                force = interpolated[i - start]
+                                # print("Force:", force)
+                                # print("Interpolated shape:", interpolated.shape)
                                 
                                 direction_vector = (past_positions[-1] - past_positions[0]).cpu()
-                                print("Direction vector:", direction_vector)
+                                # print("Direction vector:", direction_vector)
 
                                 mean_velocity_vector = mean_velocity[i - start].cpu()
-                                print("Mean velocity vector:", mean_velocity_vector)
+                                # print("Mean velocity vector:", mean_velocity_vector)
                                 
                                 dot_product = torch.dot(mean_velocity_vector, force[:, 0, 0].cpu())
                                 if dot_product < 0:
