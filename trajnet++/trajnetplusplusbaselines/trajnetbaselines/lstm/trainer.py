@@ -29,7 +29,10 @@ class Trainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, lr_scheduler=None,
                  device=None, batch_size=8, obs_length=9, pred_length=12, augment=True,
                  normalize_scene=False, save_every=1, start_length=0, obs_dropout=False,
-                 augment_noise=False, val_flag=True):
+                 augment_noise=False, val_flag=True, plot_name="default", is_highway=False):
+        self.plot_name = plot_name
+        self.is_highway = is_highway
+
         self.model = model if model is not None else LSTM()
         self.criterion = criterion if criterion is not None else PredictionLoss()
         self.optimizer = optimizer if optimizer is not None else \
@@ -316,6 +319,11 @@ class Trainer(object):
 
 def main(epochs=25):
     parser = argparse.ArgumentParser()
+    parser.add_argument('--plot_name', default="default",
+                    help='name of the plot')
+    
+    parser.add_argument('--is_highway', action='store_true',
+                    help='flag to consider highway scenes')
     parser.add_argument('--epochs', default=epochs, type=int,
                         help='number of epochs')
     parser.add_argument('--save_every', default=5, type=int,
@@ -495,7 +503,7 @@ def main(epochs=25):
                  embedding_dim=args.coordinate_embedding_dim,
                  hidden_dim=args.hidden_dim,
                  goal_flag=args.goals,
-                 goal_dim=args.goal_dim)
+                 goal_dim=args.goal_dim, plot_name=args.plot_name, is_highway=args.is_highway)
 
     # optimizer and schedular
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -531,7 +539,7 @@ def main(epochs=25):
                       criterion=criterion, batch_size=args.batch_size, obs_length=args.obs_length,
                       pred_length=args.pred_length, augment=args.augment, normalize_scene=args.normalize_scene,
                       save_every=args.save_every, start_length=args.start_length, obs_dropout=args.obs_dropout,
-                      augment_noise=args.augment_noise, val_flag=val_flag)
+                      augment_noise=args.augment_noise, val_flag=val_flag, plot_name=args.plot_name)
     trainer.loop(train_scenes, val_scenes, train_goals, val_goals, args.output, epochs=args.epochs, start_epoch=start_epoch)
 
 

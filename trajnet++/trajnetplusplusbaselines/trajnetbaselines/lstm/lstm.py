@@ -1,3 +1,5 @@
+import os
+
 import itertools
 import copy
 
@@ -53,7 +55,7 @@ def generate_pooling_inputs(obs2, obs1, hidden_cell_state, track_mask, batch_spl
 
 
 class LSTM(torch.nn.Module):
-    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=12):
+    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=12, plot_name="default", is_highway=False):
         """ Initialize the LSTM forecasting model
 
         Attributes
@@ -76,7 +78,11 @@ class LSTM(torch.nn.Module):
         self.pool_to_input = pool_to_input
 
         self.force_field_resolution = force_field_resolution
-        self.plot_vector_field_freq = 1
+        self.plot_vector_field_freq = 10
+        self.plot_counter = 0
+        self.plot_counter_check = self.plot_counter + 1
+        self.plot_name = plot_name
+        self.is_highway = is_highway
 
         ## Location
         scale = 4.0
@@ -229,7 +235,7 @@ class LSTM(torch.nn.Module):
         assert ((prediction_truth is None) + (n_predict is None)) == 1
         if n_predict is not None:
             prediction_truth = [None for _ in range(n_predict)]
-
+        self.plot_counter += 1
         # initialize: Because of tracks with different lengths and the masked
         # update, the hidden state for every LSTM needs to be a separate object
         # in the backprop graph. Therefore: list of hidden states instead of
@@ -317,17 +323,20 @@ class LSTM(torch.nn.Module):
         forces = torch.zeros((len(obs1), 2), device=device)
 
         # Fixed boundaries for the scene
-        x_min_scene = -1
+        x_min_scene = -4
         x_max_scene = 4
         y_min_scene = -1
-        y_max_scene = 4
+        y_max_scene = 1
+        if not self.is_highway:
+            y_min_scene = -4
+            y_max_scene = 4
         
         encoder_output_reshaped = force_field.view(len(velocities), self.force_field_resolution, self.force_field_resolution, 2)
         
         # Calculate mean velocity over the observed sequence for all scenes
         mean_velocity_all_scenes = self.calculate_mean_velocity(observed)
         # Scale the velocities to make them larger
-        scale = 10
+        scale = 1
         mean_velocity_all_scenes.mul_(scale)
 
         # For each scene
@@ -382,7 +391,7 @@ class LSTM(torch.nn.Module):
             # Reshape the current positions to [batch_size, height, width, 2]
             current_positions = current_positions.view(end-start, 1, 1, 2)
             # print(current_positions.shape, current_positions[0])
-            interpolated = torch.nn.functional.grid_sample(vectors.nan_to_num(0), current_positions, padding_mode="zeros", align_corners=False, mode="bilinear")
+            interpolated = torch.nn.functional.grid_sample(vectors.nan_to_num(1), current_positions, padding_mode="zeros", align_corners=False, mode="nearest")
             # print(interpolated)
             if torch.isnan(points).any():
                 forces[start:end] = torch.zeros((end - start, 2), device=device)
@@ -390,12 +399,26 @@ class LSTM(torch.nn.Module):
                 forces[start:end] = interpolated.view(end-start, 2)
 
                 i = start
-                if save_plots:
+                if save_plots and self.plot_counter == self.plot_vector_field_freq * self.plot_counter_check:
+                    self.plot_counter_check += 1
                     if (torch.isnan(obs1m_scene[i-start, 0])): continue
                     # Plot the vector field
-                    plt.figure()
+                    plt.figure(figsize=(x_max_scene-x_min_scene, y_max_scene-y_min_scene))
 
-                    plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_scene[i-start].detach().cpu(), V_scene[i-start].detach().cpu(), scale_units='xy', scale=2)
+                    # Define the region around the main agent
+                    agent_x = obs1m_scene[i-start, 0].detach().cpu()
+                    agent_y = obs1m_scene[i-start, 1].detach().cpu()
+                    radius = 1.0  # adjust this value to change the size of the region around the agent
+
+                    # Create a mask for the region around the main agent
+                    mask = ((X_scene.detach().cpu() - agent_x)**2 + (Y_scene.detach().cpu() - agent_y)**2) < radius**2
+
+                    # Apply the mask to the vector field
+                    U_masked = U_scene[i-start].detach().cpu() * mask
+                    V_masked = V_scene[i-start].detach().cpu() * mask
+
+                    # Plot the masked vector field
+                    plt.quiver(X_scene.detach().cpu(), Y_scene.detach().cpu(), U_masked, V_masked, scale_units='xy', scale=1, color='0.3', width=0.005)
                     scale = 1
 
                     # Plot the trajectory of the pedestrian
@@ -411,7 +434,7 @@ class LSTM(torch.nn.Module):
                             for k in range(len(past_positions) - 1):
                                 if (k == len(past_positions) - 2): color = "green"
                                 plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
-                                        [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=2, color=color)
+                                        [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=3, color=color)
                                 
                             # If this is the main pedestrian, draw a large arrow representing the direction of the whole past positions
 
@@ -428,17 +451,20 @@ class LSTM(torch.nn.Module):
                                 # print("Mean velocity vector:", mean_velocity_vector)
                                 
                                 dot_product = torch.dot(mean_velocity_vector, force[:, 0, 0].cpu())
-                                if dot_product < 0:
-                                    print("Mean velocity and force vectors have opposite directions.")
-                                else:
-                                    print("Mean velocity and force vectors have the same or similar directions.")
+                                # if dot_product < 0:
+                                #     print("Mean velocity and force vectors have opposite directions.")
+                                # else:
+                                #     print("Mean velocity and force vectors have the same or similar directions.")
 
 
                                 plt.arrow(past_positions[0][0].cpu() / scale, past_positions[0][1].cpu() / scale, mean_velocity_vector[0], mean_velocity_vector[1], color='orange', width=0.05)
                                 plt.arrow(past_positions[-1][0].cpu() / scale, past_positions[-1][1].cpu() / scale, force[0].cpu().detach() / scale, force[1].cpu().detach() / scale, color='green', width=0.05)
                     plt.title(f'Vector field for pedestrian {i}')
                     # Save the plot as an image file
-                    plt.savefig(f'vector_field_scene_{scene_idx}_pedestrian_{i}.png')
+                    if not os.path.exists(f'intermediate-plots/{self.plot_name}'):
+                        # If the directory does not exist, create it
+                        os.makedirs(f'intermediate-plots/{self.plot_name}')
+                    plt.savefig(f'intermediate-plots/{self.plot_name}/vector_field_scene_{self.plot_counter}_pedestrian_{i}.png')
                     plt.close()
 
 
