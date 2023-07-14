@@ -270,6 +270,9 @@ class LSTM(torch.nn.Module):
         prediction_truth = copy.deepcopy(list(itertools.chain.from_iterable(
             (observed[-1:], prediction_truth)
         )))
+
+        velocity = torch.zeros_like(obs1)  # Initialize velocity
+
         # decoder, predictions
         for obs1, obs2 in zip(prediction_truth[:-1], prediction_truth[1:]):
             if obs1 is None:
@@ -283,8 +286,11 @@ class LSTM(torch.nn.Module):
             #     for primary_id in batch_split[:-1]:
             #         print(obs2[primary_id])
                     # obs2[primary_id] = positions[-1][primary_id].detach()  # DETACH!!!
-            velocity = self.encoder_to_force_field(force_field, obs1, obs2, batch_split, observed=observed)
-            # concat predictions
+
+            force = self.encoder_to_force_field(force_field, obs1, obs2, batch_split, observed=observed)
+
+            # Integrate force to update velocity
+            velocity += force * 0.01  # You might want to multiply force by a time step size if it's not equal to 1
 
             positions.append(obs2 + velocity)
 
@@ -357,8 +363,12 @@ class LSTM(torch.nn.Module):
             U_scene = mean_velocity[:, 0].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(X_scene)
             V_scene = mean_velocity[:, 1].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(Y_scene)
             if (U_scene.shape[0] < end-start): print(U_scene.shape, end, start)
-            U_scene += encoder_output_reshaped[end-start, : , : , 0]
-            V_scene += encoder_output_reshaped[end-start, : , : , 1]
+            if (len(batch_split) != 2):
+                U_scene += encoder_output_reshaped[end-start, : , : , 0]
+                V_scene += encoder_output_reshaped[end-start, : , : , 1]
+            else:
+                U_scene += encoder_output_reshaped[ : , : , : , 0]
+                V_scene += encoder_output_reshaped[ : , : , : , 1]            
             
             # Create an array of vectors for interpolation 
             # print(torch.stack([U_scene.flatten(), V_scene.flatten()]).shape)
@@ -397,6 +407,7 @@ class LSTM(torch.nn.Module):
                 forces[start:end] = torch.zeros((end - start, 2), device=device)
             else:
                 forces[start:end] = interpolated.view(end-start, 2)
+                
 
                 i = start
                 if save_plots and self.plot_counter == self.plot_vector_field_freq * self.plot_counter_check:
@@ -432,9 +443,12 @@ class LSTM(torch.nn.Module):
                             if j == i: color = "red"
                             
                             for k in range(len(past_positions) - 1):
-                                if (k == len(past_positions) - 2): color = "green"
-                                plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
-                                        [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=3, color=color)
+                                if (k == len(past_positions) - 2):
+                                    color = "green"
+                                    plt.arrow(past_positions[-2][0], past_positions[-2][1], past_positions[-1][0].cpu() - past_positions[-2][0].cpu(), past_positions[-1][1].cpu() - past_positions[-2][1].cpu(), width=0.05, color='g')
+                                else:
+                                    plt.plot([past_positions[k][0] / scale, past_positions[k+1][0] / scale], 
+                                            [past_positions[k][1] / scale, past_positions[k+1][1] / scale], 'b-', linewidth=3, color=color)
                                 
                             # If this is the main pedestrian, draw a large arrow representing the direction of the whole past positions
 

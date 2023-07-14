@@ -88,15 +88,15 @@ def main():
             colors = [np.random.rand(3,) for ped_rows in paths[1:]]
 
             gt_filename = f"{folder_name}/gt_scene{scene_id}.png"
-            with show.paths(paths, output_file=gt_filename, colors=colors):
+            with show.paths(paths, output_file=gt_filename):
                 pass
             # Visualize Model Prediction scene
             pred_filename = f"{folder_name}/pred_scene{scene_id}.png"
             full_predicted_paths = add_gt_observation_to_prediction(paths, predicted_paths)
-            with show.paths(full_predicted_paths, output_file=pred_filename, colors=colors):
+            with show.paths(full_predicted_paths, output_file=pred_filename):
                 pass
             pred_only_filename = f"{folder_name}/pred_only_scene{scene_id}.png"
-            with show.paths(predicted_paths, output_file=pred_only_filename, colors=colors):
+            with show.paths(predicted_paths, output_file=pred_only_filename):
                 pass
 
 if __name__ == '__main__':
