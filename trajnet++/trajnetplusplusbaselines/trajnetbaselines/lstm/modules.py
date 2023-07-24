@@ -80,3 +80,21 @@ class Hidden2ForceField(torch.nn.Module):
 
         return force_field
 
+
+
+class Hidden2Force(torch.nn.Module):
+    def __init__(self, hidden_dim):
+        super(Hidden2Force, self).__init__()
+        self.linear = torch.nn.Linear(hidden_dim, 2)
+
+    def forward(self, hidden_state):
+
+        force_field = self.linear(hidden_state)
+
+        # numerically stable output ranges
+        # normal[:, 2] = 0.01 + 0.2 * torch.sigmoid(normal[:, 2])  # sigma 1
+        # normal[:, 3] = 0.01 + 0.2 * torch.sigmoid(normal[:, 3])  # sigma 2
+        # normal[:, 4] = 0.7 * torch.sigmoid(normal[:, 4])  # rho
+
+        return force_field
+
