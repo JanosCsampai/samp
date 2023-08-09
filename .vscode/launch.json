@@ -1,33 +1,101 @@
 {
-    "name": "Python: Attach",
-    "type": "python",
-    "request": "attach",
-    "connect": {
-        "host": "localhost",
-        "port": 5678
-    },
-    "pathMappings": [
-        {
-            "localRoot": "${workspaceFolder}",
-            "remoteRoot": "."
-        }
-    ],
+    "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Remote Attach",
+            "name": "Visualize synth_data",
             "type": "python",
-            "request": "attach",
-            "connect": {
-                "host": "localhost",
-                "port": 5678
+            "request": "launch",
+            "module": "evaluator.visualize_predictions",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+                "PYTHONUNBUFFERED": "1"
             },
-            "pathMappings": [
-                {
-                    "localRoot": "${workspaceFolder}",
-                    "remoteRoot": "."
-                }
-            ],
-            "justMyCode": true
+            "python": "/home/csampai/.conda/envs/samp/bin/python",
+            "cwd": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+            "args": [
+                "DATA_BLOCK/synth_data/test_private/orca_five_synth.ndjson",
+                "DATA_BLOCK/synth_data/test_pred/lstm_directional_None.epoch20_modes1/orca_five_synth.ndjson"
+            ]
+        },
+        {
+            "name": "Evaluator",
+            "type": "python",
+            "request": "launch",
+            "module": "trajnetbaselines.lstm.trajnet_evaluator",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "python": "/home/csampai/.conda/envs/samp/bin/python",
+            "cwd": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+            "args": [
+                "--output",
+                "OUTPUT_BLOCK/highD100_v0.1/lstm_directional_None.pkl.epoch15",
+                "--path",
+                "highD100_v0.1_test_on_train",
+            ]
+        },
+        {
+            "name": "Evaluator synth_data",
+            "type": "python",
+            "request": "launch",
+            "module": "trajnetbaselines.lstm.trajnet_evaluator",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "python": "/home/csampai/.conda/envs/samp/bin/python",
+            "cwd": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+            "args": [
+                "--output",
+                "OUTPUT_BLOCK/synth_data/lstm_directional_None.pkl.epoch20",
+                "--path",
+                "synth_data"
+            ]
+        },
+        {
+            "name": "Trainer",
+            "type": "python",
+            "request": "launch",
+            "module": "trajnetbaselines.lstm.trainer",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "python": "/home/csampai/.conda/envs/samp/bin/python",
+            "cwd": "/home/csampai/bachelor-thesis/trajnet++/trajnetplusplusbaselines",
+            "args": [
+                "--type",
+                "social",
+                "--epochs",
+                "25",
+                "--step_size",
+                "5",
+                "--n",
+                "16",
+                "--cell_side",
+                "6.0",
+                "--embedding_arch",
+                "two_layer",
+                "--layer_dims",
+                "2048",
+                "--batch_size",
+                "75",
+                "--loss",
+                "L2",
+                "--path",
+                "highD100_v0.1",
+                "--hidden-dim",
+                "512",
+                "--plot_name",
+                "debugger_fixed_vel_field_nearest_highway",
+                "--is_highway"
+                
+            ]
         }
     ]
 }

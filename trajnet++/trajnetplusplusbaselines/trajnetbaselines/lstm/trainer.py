@@ -531,6 +531,10 @@ def main(epochs=25):
         # useful to continue model training
             print("Loading Optimizer Dict")
             optimizer.load_state_dict(checkpoint['optimizer'])
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.cuda("cuda:1")
             lr_scheduler.load_state_dict(checkpoint['scheduler'])
             start_epoch = checkpoint['epoch']
 

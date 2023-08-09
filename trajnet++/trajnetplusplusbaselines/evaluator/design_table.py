@@ -98,7 +98,7 @@ class Table(object):
         it = 0
         len_name = 10
         for key in self.results:
-            df.loc[it] = ['Overall'] + [key[:len_name]] + [self.results[key][index].__format__('.2f') for index in range(32, 40)] + [self.collision_test[key]]
+            df.loc[it] = ['Overall'] + [key[:len_name]] + [self.results[key][index].__format__('.4f') for index in range(32, 40)] + [self.collision_test[key]]
             it += 1
         ax1 = self.render_mpl_table(df, header_columns=0, col_width=2.0, bbox=[0, 0.9, 1, 0.1*len(self.results)], ax=ax1)
 
@@ -113,7 +113,7 @@ class Table(object):
 
         ##Type I
         for key in self.results:    
-            df.loc[it] = type_list[0] + [key[:len_name]] + [self.results[key][index].__format__('.2f') for index in range(8)]
+            df.loc[it] = type_list[0] + [key[:len_name]] + [self.results[key][index].__format__('.4f') for index in range(8)]
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -121,7 +121,7 @@ class Table(object):
 
         ##Type II
         for key in self.results:  
-            df.loc[it] = type_list[1] + [key[:len_name]] + [self.results[key][index].__format__('.2f') for index in range(8, 16)] 
+            df.loc[it] = type_list[1] + [key[:len_name]] + [self.results[key][index].__format__('.4f') for index in range(8, 16)] 
             it += 1        
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -129,7 +129,7 @@ class Table(object):
 
         ##Type III
         for key in self.results:  
-            df.loc[it] = type_list[2] + [key[:len_name]] + [self.results[key][index].__format__('.2f') for index in range(16, 24)] 
+            df.loc[it] = type_list[2] + [key[:len_name]] + [self.results[key][index].__format__('.4f') for index in range(16, 24)] 
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -137,7 +137,7 @@ class Table(object):
 
         ##Type III: LF
         for key in self.results:  
-            df.loc[it] = type_list[3] + [key[:len_name]] + [self.sub_results[key][index].__format__('.2f') for index in range(8)] 
+            df.loc[it] = type_list[3] + [key[:len_name]] + [self.sub_results[key][index].__format__('.4f') for index in range(8)] 
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -145,7 +145,7 @@ class Table(object):
 
         ##Type III: CA
         for key in self.results:  
-            df.loc[it] = type_list[4] + [key[:len_name]] + [self.sub_results[key][index].__format__('.2f') for index in range(8, 16)] 
+            df.loc[it] = type_list[4] + [key[:len_name]] + [self.sub_results[key][index].__format__('.4f') for index in range(8, 16)] 
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -153,7 +153,7 @@ class Table(object):
 
         ##Type III: Grp
         for key in self.results:  
-            df.loc[it] = type_list[5] + [key[:len_name]] + [self.sub_results[key][index].__format__('.2f') for index in range(16, 24)] 
+            df.loc[it] = type_list[5] + [key[:len_name]] + [self.sub_results[key][index].__format__('.4f') for index in range(16, 24)] 
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -161,7 +161,7 @@ class Table(object):
 
         ##Type III: Others
         for key in self.results:  
-            df.loc[it] = type_list[6] + [key[:len_name]] + [self.sub_results[key][index].__format__('.2f') for index in range(24, 32)] 
+            df.loc[it] = type_list[6] + [key[:len_name]] + [self.sub_results[key][index].__format__('.4f') for index in range(24, 32)] 
             it += 1
 
         df.loc[it] = ['Type', 'Sub-Type', 'Model', 'No.', 'ADE', 'FDE', 'Col I', 'Col II', 'Top3 ADE', 'Top3 FDE', 'NLL']
@@ -169,7 +169,7 @@ class Table(object):
 
         ##Type IV
         for key in self.results:  
-            df.loc[it] = type_list[7] + [key[:len_name]] + [self.results[key][index].__format__('.2f') for index in range(24, 32)] 
+            df.loc[it] = type_list[7] + [key[:len_name]] + [self.results[key][index].__format__('.4f') for index in range(24, 32)] 
             it += 1
 
 

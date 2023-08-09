@@ -3,11 +3,10 @@ import copy
 
 import numpy as np
 import torch
-import os
+
 import trajnetplusplustools
 
 from .modules import Hidden2Normal, InputEmbedding, Hidden2Force, Hidden2ForceField
-import matplotlib.pyplot as plt
 
 from .. import augmentation
 from .utils import center_scene
@@ -44,7 +43,7 @@ def generate_pooling_inputs(obs2, obs1, hidden_cell_state, track_mask, batch_spl
 
 
 class LSTM(torch.nn.Module):
-    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, width=24, height=12, plot_name="", is_highway=False):
+    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, force_field_resolution=12, plot_name="", is_highway=False):
         """ Initialize the LSTM forecasting model
 
         Attributes
@@ -66,8 +65,7 @@ class LSTM(torch.nn.Module):
         self.pool = pool
         self.pool_to_input = pool_to_input
 
-        self.width = width
-        self.height = height
+        self.force_field_resolution = force_field_resolution
         self.plot_vector_field_freq = 500
         self.plot_counter = 0
         self.plot_counter_check = self.plot_counter + 1
@@ -94,9 +92,9 @@ class LSTM(torch.nn.Module):
 
         # Predict the parameters of a multivariate normal:
         # mu_vel_x, mu_vel_y, sigma_vel_x, sigma_vel_y, rho
-        #self.hidden2normal = Hidden2Normal(self.hidden_dim)
+        self.hidden2normal = Hidden2Normal(self.hidden_dim)
         self.hidden2force = Hidden2Force(self.hidden_dim)
-        self.hidden2ForceField = Hidden2ForceField(self.hidden_dim, self.width*self.height*2)
+        self.hidden2ForceField = Hidden2ForceField(self.hidden_dim, self.force_field_resolution*self.force_field_resolution*2)
 
     def step(self, lstm, hidden_cell_state, obs1, obs2, goals, batch_split):
         """Do one step of prediction: two inputs to one normal prediction.
@@ -162,10 +160,10 @@ class LSTM(torch.nn.Module):
 
         # LSTM step
         hidden_cell_stacked = lstm(input_emb, hidden_cell_stacked)
-        normal_masked = self.hidden2ForceField(hidden_cell_stacked[0])
+        normal_masked = self.hidden2normal(hidden_cell_stacked[0])
 
         # unmask [Update hidden-states and next velocities of pedestrians]
-        normal = torch.full((track_mask.size(0), self.width*self.height*2), NAN, device=obs1.device)
+        normal = torch.full((track_mask.size(0), 5), NAN, device=obs1.device)
         mask_index = [i for i, m in enumerate(track_mask) if m]
         for i, h, c, n in zip(mask_index,
                               hidden_cell_stacked[0],
@@ -232,22 +230,15 @@ class LSTM(torch.nn.Module):
             positions = [observed[-1]]
 
         # encoder
-        i = 0
-
-        velocity = torch.zeros_like(observed[0])
         for obs1, obs2 in zip(observed[:-1], observed[1:]):
             ##LSTM Step
             hidden_cell_state, normal = self.step(self.encoder, hidden_cell_state, obs1, obs2, goals, batch_split)
 
-            # velocity, frames = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed, positions=positions, step_index=i, save_plots=False)
+            #velocity = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed)
 
-            force, frames = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed, positions=positions, step_index=i, save_plots=False)
-
-            velocity += force
             # concat predictions
             normals.append(normal)
-            positions.append(obs2 + velocity)  # no sampling, just mean
-            i += 1
+            positions.append(obs2 + normal[:, :2])  # no sampling, just mean
 
         # initialize predictions with last position to form velocity. DEEP COPY !!!
         prediction_truth = copy.deepcopy(list(itertools.chain.from_iterable(
@@ -255,10 +246,6 @@ class LSTM(torch.nn.Module):
         )))
 
         # decoder, predictions
-        i = 0
-        # init velocity as last observed velocity
-        velocity = observed[-1]-observed[-2]
-
         for obs1, obs2 in zip(prediction_truth[:-1], prediction_truth[1:]):
             if obs1 is None:
                 obs1 = positions[-2].detach()  # DETACH!!!
@@ -272,14 +259,11 @@ class LSTM(torch.nn.Module):
                     obs2[primary_id] = positions[-1][primary_id].detach()  # DETACH!!!
             hidden_cell_state, normal = self.step(self.decoder, hidden_cell_state, obs1, obs2, goals, batch_split)
 
-            # velocity, frames = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed, positions=positions, step_index=i, save_plots=True)
+            #velocity = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed)
 
-            force, frames = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed, positions=positions, step_index=i, save_plots=True)
-            velocity += force
             # concat predictions
             normals.append(normal)
-            positions.append(obs2 + velocity)  # no sampling, just mean
-            i += 1
+            positions.append(obs2 + normal[:, :2]) # no sampling, just mean
 
         # Pred_scene: Tensor [seq_length, num_tracks, 2]
         #    Absolute positions of all pedestrians
@@ -302,14 +286,14 @@ class LSTM(torch.nn.Module):
         forces = torch.zeros((len(obs1), 2), device=device)
 
         # Define scene boundaries
-        x_min_scene, x_max_scene = (-4, 4) if not self.is_highway else (0, 4)
+        x_min_scene, x_max_scene = (-4, 4)
         y_min_scene, y_max_scene = (-4, 4) if not self.is_highway else (-1, 1)
 
         # Reshape the force field for convenient indexing
-        decoder_output_reshaped = force_field.view(len(velocities), self.width, self.height, 2)
+        decoder_output_reshaped = force_field.view(len(velocities), self.force_field_resolution, self.force_field_resolution, 2)
 
         # Create a grid of points within the scene
-        x_scene, y_scene = torch.linspace(x_min_scene, x_max_scene, self.width, device=device), torch.linspace(y_min_scene, y_max_scene, self.height, device=device)
+        x_scene, y_scene = torch.linspace(x_min_scene, x_max_scene, self.force_field_resolution, device=device), torch.linspace(y_min_scene, y_max_scene, self.force_field_resolution, device=device)
         X_scene, Y_scene = torch.meshgrid(x_scene, y_scene)
         frames = []
 
@@ -331,7 +315,7 @@ class LSTM(torch.nn.Module):
             V_scene += decoder_output_reshaped[end-start if len(batch_split) != 2 else slice(None), : , : , 1]
 
             # Initialize a vector array for interpolation
-            vectors = torch.zeros((end-start, 2, self.width, self.height), device=device)
+            vectors = torch.zeros((end-start, 2, self.force_field_resolution, self.force_field_resolution), device=device)
             vectors[:, 0, :, :], vectors[:, 1, :, :] = U_scene, V_scene
 
             points = torch.stack([X_scene.flatten(), Y_scene.flatten()], dim=-1)
@@ -361,11 +345,8 @@ class LSTM(torch.nn.Module):
                     self.plot_counter_check += 1
                     if (torch.isnan(obs1m_scene[i-start, 0])): continue
                     # Plot the vector field
-                    # Create a new figure for the animation
-                    fig_width = x_max_scene - x_min_scene
-                    fig_height = y_max_scene - y_min_scene
-                    plt.figure(figsize=(fig_width + 2, fig_height))
-
+                        # Create a new figure for the animation
+                    #fig = plt.figure(figsize=(x_max_scene-x_min_scene+2, y_max_scene-y_min_scene+2))
 
                     # Create a list to store the frames of the animation
                     # Define the region around the main agent
@@ -381,14 +362,14 @@ class LSTM(torch.nn.Module):
                     # Apply the mask to the vector field
                     U_masked = U_scene[i-start].detach().cpu()# * mask
                     V_masked = V_scene[i-start].detach().cpu()# * mask
-                    # plt.gca().set_aspect('auto')
-                    # plt.gcf().set_size_inches(6, 4)
+
                     # Plot the masked vector field
                     frames.append(plt.quiver(
-                        X_scene.detach().cpu(),
-                        Y_scene.detach().cpu(),
-                        U_masked.cpu().detach() * 100,
-                        V_masked.cpu().detach() * 100,
+                        X_scene.detach().cpu(), 
+                        Y_scene.detach().cpu(), 
+                        U_masked.cpu().detach(), 
+                        V_masked.cpu().detach(), 
+                        scale_units='xy', 
                         scale=1, 
                         color='0.3', 
                         width=0.005
@@ -453,19 +434,17 @@ class LSTM(torch.nn.Module):
                     ))
 
                     
-                    # set size of plot to always be the same scale
-                    # plt.xlim(x_min_scene, x_max_scene)
-                    # plt.ylim(y_min_scene, y_max_scene)
                     
-                    plt.title(f'Vector field for pedestrian {i}')
-                    # Save the plot as an image file
-                    if not os.path.exists(f'intermediate-plots/{self.plot_name}'):
-                        # If the directory does not exist, create it
-                        os.makedirs(f'intermediate-plots/{self.plot_name}')
-                    plt.savefig(
-                        f'intermediate-plots/{self.plot_name}/vector_field_scene_{self.plot_counter}_step_{step_index}_pedestrian_{i}.png'
-                    )
-                    plt.close()
+                    
+                    # plt.title(f'Vector field for pedestrian {i}')
+                    # # Save the plot as an image file
+                    # if not os.path.exists(f'intermediate-plots/{self.plot_name}'):
+                    #     # If the directory does not exist, create it
+                    #     os.makedirs(f'intermediate-plots/{self.plot_name}')
+                    # plt.savefig(
+                    #     f'intermediate-plots/{self.plot_name}/vector_field_scene_{self.plot_counter}_step_{step_index}_pedestrian_{i}.png'
+                    # )
+                    # plt.close()
 
 
         return forces, frames
