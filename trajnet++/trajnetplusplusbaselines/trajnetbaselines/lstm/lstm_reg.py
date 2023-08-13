@@ -234,8 +234,6 @@ class LSTM(torch.nn.Module):
             ##LSTM Step
             hidden_cell_state, normal = self.step(self.encoder, hidden_cell_state, obs1, obs2, goals, batch_split)
 
-            #velocity = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed)
-
             # concat predictions
             normals.append(normal)
             positions.append(obs2 + normal[:, :2])  # no sampling, just mean
@@ -259,8 +257,6 @@ class LSTM(torch.nn.Module):
                     obs2[primary_id] = positions[-1][primary_id].detach()  # DETACH!!!
             hidden_cell_state, normal = self.step(self.decoder, hidden_cell_state, obs1, obs2, goals, batch_split)
 
-            #velocity = self.encoder_to_force_field(normal, obs1, obs2, batch_split, observed=observed)
-
             # concat predictions
             normals.append(normal)
             positions.append(obs2 + normal[:, :2]) # no sampling, just mean
@@ -274,181 +270,6 @@ class LSTM(torch.nn.Module):
 
         return rel_pred_scene, pred_scene
     
-    
-    def encoder_to_force_field(self, force_field, obs1, obs2, batch_split, observed, positions, step_index, save_plots=False):
-        # Compute velocities
-        velocities = obs2 - obs1
-
-        # Set device to GPU
-        device = torch.device("cuda:1")
-
-        # Preallocate memory for forces
-        forces = torch.zeros((len(obs1), 2), device=device)
-
-        # Define scene boundaries
-        x_min_scene, x_max_scene = (-4, 4)
-        y_min_scene, y_max_scene = (-4, 4) if not self.is_highway else (-1, 1)
-
-        # Reshape the force field for convenient indexing
-        decoder_output_reshaped = force_field.view(len(velocities), self.force_field_resolution, self.force_field_resolution, 2)
-
-        # Create a grid of points within the scene
-        x_scene, y_scene = torch.linspace(x_min_scene, x_max_scene, self.force_field_resolution, device=device), torch.linspace(y_min_scene, y_max_scene, self.force_field_resolution, device=device)
-        X_scene, Y_scene = torch.meshgrid(x_scene, y_scene)
-        frames = []
-
-        # Loop over all scenes
-        for _, (start, end) in enumerate(zip(batch_split[:-1], batch_split[1:])):
-            # Extract current scene from encoder output
-            obs1m_scene, obs2m_scene = obs1[start:end], obs2[start:end]
-            #if (start == 0): print("First Scene: ", obs2m_scene)
-
-            # Initialize zero force for current scene
-            init_forces = torch.zeros(end-start, 2, device=device)
-
-            # Create a vector field with only zero vectors
-            U_scene = init_forces[:, 0].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(X_scene)
-            V_scene = init_forces[:, 1].unsqueeze(-1).unsqueeze(-1) * torch.ones_like(Y_scene)
-
-            # Add decoder output to the vector field
-            U_scene += decoder_output_reshaped[end-start if len(batch_split) != 2 else slice(None), : , : , 0]
-            V_scene += decoder_output_reshaped[end-start if len(batch_split) != 2 else slice(None), : , : , 1]
-
-            # Initialize a vector array for interpolation
-            vectors = torch.zeros((end-start, 2, self.force_field_resolution, self.force_field_resolution), device=device)
-            vectors[:, 0, :, :], vectors[:, 1, :, :] = U_scene, V_scene
-
-            points = torch.stack([X_scene.flatten(), Y_scene.flatten()], dim=-1)
-
-            # Normalize the pedestrian's current position to [-1, 1]
-            current_positions = obs2m_scene.nan_to_num(0)
-            current_positions[:, 0] = (((current_positions[:, 0] - x_min_scene) / (x_max_scene - x_min_scene)) * 2) - 1
-            current_positions[:, 1] = (((current_positions[:, 1] - y_min_scene) / (y_max_scene - y_min_scene)) * 2) - 1
-
-            # Reshape the current positions for interpolation
-            current_positions = current_positions.view(end-start, 1, 1, 2)
-
-            # Interpolate the force field to find the force at the pedestrian's current position
-            interpolated = torch.nn.functional.grid_sample(vectors.nan_to_num(0), current_positions, padding_mode="zeros", align_corners=False, mode="bilinear")
-
-            # interpolated = self.nearest_neighbor_interpolation(points, vectors, current_positions)
-
-            # interpolated = closest_vector_interpolation(vectors.nan_to_num(0), current_positions.view(end - start, -1, 2))
-
-            # Add the force to the force array
-            if torch.isnan(points).any():
-                forces[start:end] = torch.zeros((end - start, 2), device=device)
-            else:
-                forces[start:end] = interpolated.view(end-start, 2)
-                i = start
-                if save_plots:
-                    self.plot_counter_check += 1
-                    if (torch.isnan(obs1m_scene[i-start, 0])): continue
-                    # Plot the vector field
-                        # Create a new figure for the animation
-                    #fig = plt.figure(figsize=(x_max_scene-x_min_scene+2, y_max_scene-y_min_scene+2))
-
-                    # Create a list to store the frames of the animation
-                    # Define the region around the main agent
-                    agent_x = obs1m_scene[i-start, 0].detach().cpu()
-                    agent_y = obs1m_scene[i-start, 1].detach().cpu()
-                    radius = 1.0  # adjust this value to change the size of the region around the agent
-
-                    # Create a mask for the region around the main agent
-                    mask = ((X_scene.detach().cpu() - agent_x)**2 + 
-                            (Y_scene.detach().cpu() - agent_y)**2
-                        ) < radius**2
-
-                    # Apply the mask to the vector field
-                    U_masked = U_scene[i-start].detach().cpu()# * mask
-                    V_masked = V_scene[i-start].detach().cpu()# * mask
-
-                    # Plot the masked vector field
-                    frames.append(plt.quiver(
-                        X_scene.detach().cpu(), 
-                        Y_scene.detach().cpu(), 
-                        U_masked.cpu().detach(), 
-                        V_masked.cpu().detach(), 
-                        scale_units='xy', 
-                        scale=1, 
-                        color='0.3', 
-                        width=0.005
-                    ))
-                    scale = 1
-                    # Plot the trajectory of the pedestrian
-                    frames.append(plt.plot(
-                        [
-                            obs1m_scene[i-start, 0] / scale, 
-                            obs2m_scene[i-start, 0] / scale
-                        ], 
-                        [
-                            obs1m_scene[i-start, 1] / scale, 
-                            obs2m_scene[i-start, 1] / scale
-                        ], 
-                        'r-', linewidth=2, color="yellow"
-                    )[0])
-                    if positions:
-                        # plot positions from observed sequence till now
-                        for j in range(len(observed)-1, len(positions)):
-                            frames.append(plt.arrow(
-                                    positions[j-1][start][0].cpu().detach(), 
-                                    positions[j-1][start][1].cpu().detach(), 
-                                    positions[j][start][0].cpu().detach() - positions[j-1][start][0].cpu().detach(), 
-                                    positions[j][start][1].cpu().detach() - positions[j-1][start][1].cpu().detach(), 
-                                    width=0.05, color="yellow"))
-                    if observed is not None:
-                        for j in range(start, end):
-                            past_positions = observed[:, j, :]
-                            color = "blue"
-                            if j == i: color = "red"
-                            
-                            for k in range(len(past_positions) - 1):
-                                if (k == len(past_positions) - 2):
-                                    frames.append(plt.arrow(
-                                    past_positions[-2][0], 
-                                    past_positions[-2][1], 
-                                    past_positions[-1][0].cpu() - past_positions[-2][0].cpu(), 
-                                    past_positions[-1][1].cpu() - past_positions[-2][1].cpu(), 
-                                    width=0.05, color=color))
-                                else:
-                                    frames.append(plt.plot(
-                                        [
-                                            past_positions[k][0] / scale, 
-                                            past_positions[k+1][0] / scale
-                                        ], 
-                                        [
-                                            past_positions[k][1] / scale, 
-                                            past_positions[k+1][1] / scale
-                                        ], 
-                                        'b-', linewidth=3, color=color
-                                    )[0])
-                                
-                    force = interpolated[i - start]
-                                
-                    frames.append(plt.arrow(
-                        obs2m_scene[i-start, 0].cpu().detach() / scale, 
-                        obs2m_scene[i-start, 1].cpu().detach() / scale, 
-                        force[0].cpu().detach() / scale, 
-                        force[1].cpu().detach() / scale, 
-                        color='pink', width=0.05
-                    ))
-
-                    
-                    
-                    
-                    # plt.title(f'Vector field for pedestrian {i}')
-                    # # Save the plot as an image file
-                    # if not os.path.exists(f'intermediate-plots/{self.plot_name}'):
-                    #     # If the directory does not exist, create it
-                    #     os.makedirs(f'intermediate-plots/{self.plot_name}')
-                    # plt.savefig(
-                    #     f'intermediate-plots/{self.plot_name}/vector_field_scene_{self.plot_counter}_step_{step_index}_pedestrian_{i}.png'
-                    # )
-                    # plt.close()
-
-
-        return forces, frames
-
 class LSTMPredictor(object):
     def __init__(self, model):
         self.model = model

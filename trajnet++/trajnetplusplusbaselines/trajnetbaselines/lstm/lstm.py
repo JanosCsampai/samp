@@ -296,7 +296,7 @@ class LSTM(torch.nn.Module):
         velocities = obs2 - obs1
 
         # Set device to GPU
-        device = torch.device("cuda:1")
+        device = torch.device("cuda:0")
 
         # Preallocate memory for forces
         forces = torch.zeros((len(obs1), 2), device=device)
