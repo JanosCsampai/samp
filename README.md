@@ -9,6 +9,6 @@ FVF-LSTM Implementation:
 Social-LSTM Implementation:
 - https://github.com/JanosCsampai/tree/force_field/trajnet++/trajnetplusplusbaselines/trajnetbaselines/lstm/lstm_reg.py
   
-HighD and Woven Planet Dataset Conversion:
+Woven Planet and HighD Dataset Conversion:
 - https://github.com/JanosCsampai/samp/tree/force_field/trajnet++/trajnetplusplusdataset/trajnetdataset/convert.py
 - https://github.com/JanosCsampai/samp/tree/force_field/trajnet++/trajnetplusplusdataset/trajnetdataset/readers.py
